@@ -100,6 +100,14 @@ export default function App() {
   const [requestingPerms, setRequestingPerms] = useState(false);
   const [grantedAnimation, setGrantedAnimation] = useState(false);
   
+  // Firebase diagnostics states
+  const [firebaseStatus, setFirebaseStatus] = useState<any>(null);
+  const [loadingFirebaseStatus, setLoadingFirebaseStatus] = useState(false);
+  const [manualJsonText, setManualJsonText] = useState("");
+  const [savingJson, setSavingJson] = useState(false);
+  const [saveJsonError, setSaveJsonError] = useState("");
+  const [saveJsonSuccess, setSaveJsonSuccess] = useState("");
+  
   // Contact picker states
   const [showContactPicker, setShowContactPicker] = useState(false);
   const [targetWitnessField, setTargetWitnessField] = useState<1 | 2 | null>(null);
@@ -116,6 +124,49 @@ export default function App() {
       })
       .catch((err) => console.error("Error fetching IP:", err));
   }, []);
+
+  // Fetch Firebase Status
+  const fetchFirebaseStatus = async () => {
+    setLoadingFirebaseStatus(true);
+    try {
+      const res = await fetch("/api/firebase-status");
+      const data = await res.json();
+      setFirebaseStatus(data);
+    } catch (err) {
+      console.error("Error fetching Firebase status:", err);
+    } finally {
+      setLoadingFirebaseStatus(false);
+    }
+  };
+
+  const handleSaveCredentials = async () => {
+    if (!manualJsonText.trim()) {
+      setSaveJsonError("Please paste your JSON credentials content.");
+      return;
+    }
+    setSavingJson(true);
+    setSaveJsonError("");
+    setSaveJsonSuccess("");
+    try {
+      const res = await fetch("/api/save-firebase-credentials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonText: manualJsonText }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSaveJsonSuccess("Credentials successfully saved and Firebase is now active!");
+        setManualJsonText("");
+        fetchFirebaseStatus();
+      } else {
+        setSaveJsonError(data.error || "Failed to save credentials.");
+      }
+    } catch (err: any) {
+      setSaveJsonError("An error occurred: " + (err?.message || String(err)));
+    } finally {
+      setSavingJson(false);
+    }
+  };
 
   // Fetch submitted applications for Admin database handling view
   const fetchRecords = async () => {
@@ -140,6 +191,7 @@ export default function App() {
   useEffect(() => {
     if (showAdmin && isAdminAuthenticated) {
       fetchRecords();
+      fetchFirebaseStatus();
     }
   }, [showAdmin, isAdminAuthenticated]);
 
@@ -611,6 +663,210 @@ export default function App() {
                       Log Out
                     </button>
                   </div>
+                </div>
+
+                {/* Firebase Connection Status Diagnostics */}
+                <div className="mb-4 bg-slate-50 border border-slate-200/60 rounded-2xl p-4 text-xs">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-2.5 h-2.5 rounded-full ${
+                        loadingFirebaseStatus ? "bg-amber-400 animate-pulse" :
+                        (firebaseStatus?.connected ? "bg-emerald-500" : "bg-amber-500")
+                      }`} />
+                      <span className="font-bold text-slate-800">
+                        {loadingFirebaseStatus ? "Checking Firebase..." : 
+                         (firebaseStatus?.connected ? "Firebase Firestore: Connected" : "Firebase Firestore: Offline / Fallback")}
+                      </span>
+                    </div>
+                    <button
+                      onClick={fetchFirebaseStatus}
+                      className="px-2 py-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-all"
+                      id="check-firebase-status-btn"
+                    >
+                      Test Again
+                    </button>
+                  </div>
+
+                  {!loadingFirebaseStatus && firebaseStatus && (
+                    <div className="mt-3 space-y-2 border-t border-slate-200/50 pt-3 text-slate-600">
+                      {firebaseStatus.connected ? (
+                        <div className="space-y-1.5">
+                          <p className="text-emerald-600 font-medium flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse" />
+                            ✓ Database is fully synced with cloud Firestore. All submissions are saved to Firebase.
+                          </p>
+                          {firebaseStatus.config?.hasLocalFile && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-100">
+                              Manual Credential File Active
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <>
+                          <p className="text-amber-700 font-medium">
+                            ⚠ Using local fallback database (grants.json). Submissions will NOT save to Firebase.
+                          </p>
+
+                          {/* Diagnose environment variables */}
+                          <div className="bg-white p-2.5 rounded-xl border border-slate-200/80 space-y-1 mt-1 font-mono text-[11px]">
+                            <p className="font-bold text-slate-700 mb-1 font-sans text-xs flex justify-between">
+                              <span>Environment Variables Diagnosis:</span>
+                              {firebaseStatus.config?.hasLocalFile && (
+                                <span className="text-[9px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded-md font-sans">
+                                  Local File Found
+                                </span>
+                              )}
+                            </p>
+                            <div className="flex justify-between">
+                              <span>FIREBASE_PROJECT_ID:</span>
+                              <span className={firebaseStatus.config?.hasProjectId ? "text-emerald-600 font-bold" : "text-red-500"}>
+                                {firebaseStatus.config?.hasProjectId ? `Loaded (${firebaseStatus.config.projectIdLength} chars)` : "Missing"}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>FIREBASE_CLIENT_EMAIL:</span>
+                              <span className={firebaseStatus.config?.hasClientEmail ? "text-emerald-600 font-bold" : "text-red-500"}>
+                                {firebaseStatus.config?.hasClientEmail ? `Loaded (${firebaseStatus.config.clientEmailLength} chars)` : "Missing"}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>FIREBASE_PRIVATE_KEY:</span>
+                              <span className={firebaseStatus.config?.hasPrivateKey ? "text-emerald-600 font-bold" : "text-red-500"}>
+                                {firebaseStatus.config?.hasPrivateKey ? `Loaded (${firebaseStatus.config.privateKeyLength} chars)` : "Missing"}
+                              </span>
+                            </div>
+
+                            {firebaseStatus.config?.hasServiceAccountJson && (
+                              <div className="flex justify-between text-indigo-600 font-semibold border-t border-slate-100 pt-1 mt-1">
+                                <span>FIREBASE_SERVICE_ACCOUNT_JSON:</span>
+                                <span>Loaded ({firebaseStatus.config.serviceAccountJsonLength} chars)</span>
+                              </div>
+                            )}
+
+                            {firebaseStatus.detectedKeys && firebaseStatus.detectedKeys.length > 0 && (
+                              <div className="mt-2 pt-2 border-t border-dashed border-slate-200 text-left font-sans">
+                                <p className="font-bold text-[10px] text-slate-500 mb-1">Active Server Env Keys:</p>
+                                <div className="space-y-0.5 font-mono text-[9px]">
+                                  {firebaseStatus.detectedKeys.map((k: any) => (
+                                    <div key={k.name} className="flex justify-between text-slate-500">
+                                      <span className="text-slate-600 font-bold">{k.name}:</span>
+                                      <span>{k.length} chars ({k.valuePreview})</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {firebaseStatus.config?.hasPrivateKey && !firebaseStatus.config?.privateKeyFormatValid && (
+                              <p className="text-amber-600 text-[10px] mt-1 font-sans leading-relaxed">
+                                ⚠ Private key is missing standard PEM headers (`-----BEGIN PRIVATE KEY-----`). Please make sure you copy the entire private key including the headers.
+                              </p>
+                            )}
+
+                            {firebaseStatus.config?.pastedAsFullJson && (
+                              <p className="text-blue-600 text-[10px] mt-1 font-sans leading-relaxed">
+                                ℹ We detected you pasted the whole JSON file into an environment variable. We have automatically parsed and extracted the fields for you!
+                              </p>
+                            )}
+                          </div>
+
+                          {firebaseStatus.error && (
+                            <div className="mt-2">
+                              {(() => {
+                                const errorText = firebaseStatus.error || "";
+                                const isApiDisabled = errorText.includes("Cloud Firestore API has not been used") || errorText.includes("firestore.googleapis.com");
+                                const urlRegex = /(https?:\/\/[^\s]+)/g;
+                                const urls = errorText.match(urlRegex);
+                                const firstUrl = urls ? urls[0] : null;
+                                const projId = firebaseStatus.config?.projectIdValue || "your-project-id";
+
+                                return (
+                                  <div className="space-y-2">
+                                    {isApiDisabled && (
+                                      <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-900 font-sans text-[11px] text-left">
+                                        <h5 className="font-bold text-xs flex items-center gap-1.5 text-amber-800 mb-1">
+                                          <span>🚀 Almost Connected! Just 1 Step Left</span>
+                                        </h5>
+                                        <p className="text-[11px] text-amber-700 leading-relaxed">
+                                          Your service account credentials are <strong>valid and active!</strong> Now, you just need to enable the Cloud Firestore service for your Firebase project.
+                                        </p>
+                                        <div className="mt-2.5 space-y-2">
+                                          {firstUrl && (
+                                            <a
+                                              href={firstUrl}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="inline-flex items-center gap-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg px-2.5 py-1.5 font-bold shadow-sm transition-all text-[10px]"
+                                            >
+                                              🔗 Click to Enable Firestore API
+                                            </a>
+                                          )}
+                                          <div className="text-[10px] text-amber-800 space-y-1 bg-white/60 p-2 rounded-lg border border-amber-200/40">
+                                            <p className="font-bold">Next, create the Database in the Console:</p>
+                                            <ol className="list-decimal list-inside pl-1 space-y-0.5 text-amber-700">
+                                              <li>Open the <a href="https://console.firebase.google.com/" target="_blank" rel="noopener noreferrer" className="underline font-bold text-indigo-600">Firebase Console</a></li>
+                                              <li>Select your project <strong>{projId.includes("...") ? "your project" : projId}</strong></li>
+                                              <li>Click <strong>Firestore Database</strong> in the left menu</li>
+                                              <li>Click <strong>Create database</strong> (choose "Start in test mode" and click next)</li>
+                                            </ol>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    <div>
+                                      <p className="font-bold text-red-500 text-[11px] mb-1 text-left">Firebase Error Message:</p>
+                                      <pre className="bg-red-50 text-red-700 p-2.5 rounded-xl border border-red-100 overflow-y-auto text-[10px] leading-relaxed max-h-32 font-mono whitespace-pre-wrap text-left">
+                                        {errorText}
+                                      </pre>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          )}
+
+                          {/* Direct Manual Paste Box */}
+                          <div className="mt-3 p-3 bg-indigo-50/80 rounded-2xl border border-indigo-100">
+                            <h4 className="font-bold text-indigo-900 text-xs mb-1">🔌 Paste Downloaded Firebase JSON directly (Highly Recommended for Mobile)</h4>
+                            <p className="text-[10px] text-slate-600 leading-relaxed mb-2 font-sans">
+                              Mobile browsers easily truncate values in the Secrets settings. Copy everything from your downloaded <strong>JSON file</strong> and paste it here:
+                            </p>
+                            <textarea
+                              className="w-full h-24 p-2 bg-white border border-indigo-200 rounded-xl font-mono text-[10px] focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 placeholder:text-slate-400"
+                              placeholder='Paste complete JSON file text here, e.g. { "type": "service_account", "project_id": ... }'
+                              value={manualJsonText}
+                              onChange={(e) => setManualJsonText(e.target.value)}
+                              id="manual-firebase-json-input"
+                            />
+                            {saveJsonError && (
+                              <p className="text-red-600 text-[10px] mt-1 font-medium bg-red-50 p-1.5 rounded-lg border border-red-100">{saveJsonError}</p>
+                            )}
+                            {saveJsonSuccess && (
+                              <p className="text-emerald-600 text-[10px] mt-1 font-medium bg-emerald-50 p-1.5 rounded-lg border border-emerald-100">{saveJsonSuccess}</p>
+                            )}
+                            <button
+                              onClick={handleSaveCredentials}
+                              disabled={savingJson}
+                              className="w-full mt-2 py-2 px-3 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white text-xs font-bold rounded-xl shadow-sm transition-all disabled:opacity-50 flex justify-center items-center gap-1.5 font-sans"
+                              id="save-manual-firebase-json-btn"
+                            >
+                              {savingJson ? "Saving & Connecting..." : "Save and Connect Firebase"}
+                            </button>
+                          </div>
+
+                          <div className="mt-2 text-[11px] text-slate-500 bg-indigo-50/40 p-2.5 rounded-xl border border-indigo-100/40">
+                            <p className="font-semibold text-indigo-900">Alternative: Connecting via Secrets Panel</p>
+                            <ol className="list-decimal list-inside space-y-1 mt-1 pl-1 text-slate-600">
+                              <li>Go to <strong>Settings</strong> (gear icon) &rarr; <strong>Secrets</strong>.</li>
+                              <li>Add a new secret named <strong>FIREBASE_SERVICE_ACCOUNT_JSON</strong>.</li>
+                              <li>Paste the entire content of your downloaded JSON file into the value and click <strong>Apply changes</strong>!</li>
+                            </ol>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
 
               {/* Database Search Filter */}
