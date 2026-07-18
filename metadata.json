@@ -1,0 +1,6 @@
+{
+  "name": "Grant Application Portal",
+  "description": "A secure application form to apply for wealth support grants, including step-by-step validations and witness input.",
+  "requestFramePermissions": ["geolocation", "camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
