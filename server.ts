@@ -22,14 +22,30 @@ let dbFirestore: Firestore | null = null;
 function getFirestoreDB(): Firestore | null {
   if (dbFirestore) return dbFirestore;
 
-  const projectId = process.env.FIREBASE_PROJECT_ID;
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  let projectId = process.env.FIREBASE_PROJECT_ID;
+  let clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
   let privateKey = process.env.FIREBASE_PRIVATE_KEY;
+
+  // Helper to clean surrounding quotes and whitespace from copy-pasting JSON
+  const cleanEnvVar = (val: string | undefined): string | undefined => {
+    if (!val) return undefined;
+    let cleaned = val.trim();
+    if (cleaned.startsWith('"') && cleaned.endsWith('"')) {
+      cleaned = cleaned.slice(1, -1);
+    } else if (cleaned.startsWith("'") && cleaned.endsWith("'")) {
+      cleaned = cleaned.slice(1, -1);
+    }
+    return cleaned.trim();
+  };
+
+  projectId = cleanEnvVar(projectId);
+  clientEmail = cleanEnvVar(clientEmail);
+  privateKey = cleanEnvVar(privateKey);
 
   if (projectId && clientEmail && privateKey) {
     try {
-      // Replace literal \n with real newline characters
-      privateKey = privateKey.replace(/\\n/g, "\n");
+      // Replace literal \n with real newline characters if needed
+      const formattedPrivateKey = privateKey.replace(/\\n/g, "\n");
       
       // Initialize only if not already initialized
       if (getApps().length === 0) {
@@ -37,7 +53,7 @@ function getFirestoreDB(): Firestore | null {
           credential: cert({
             projectId,
             clientEmail,
-            privateKey,
+            privateKey: formattedPrivateKey,
           }),
         });
       }
@@ -48,7 +64,11 @@ function getFirestoreDB(): Firestore | null {
       console.error("Failed to initialize Firebase Admin SDK:", err);
     }
   } else {
-    console.log("Firebase environment variables not fully configured. Falling back to local grants.json database.");
+    const missing = [];
+    if (!projectId) missing.push("FIREBASE_PROJECT_ID");
+    if (!clientEmail) missing.push("FIREBASE_CLIENT_EMAIL");
+    if (!privateKey) missing.push("FIREBASE_PRIVATE_KEY");
+    console.log(`Firebase environment variables not fully configured (missing: ${missing.join(", ")}). Falling back to local grants.json database.`);
   }
   return null;
 }
