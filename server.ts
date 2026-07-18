@@ -152,6 +152,16 @@ function getFirestoreDB(): Firestore | null {
       dbFirestore = getFirestore();
       console.log("Firebase Admin SDK initialized successfully for Firestore.");
       lastInitializationError = null;
+
+      // Asynchronously migrate any offline/local records to Firebase
+      setTimeout(() => {
+        if (dbFirestore) {
+          migrateLocalToFirestore(dbFirestore).catch((err) => {
+            console.error("Migration error background task:", err);
+          });
+        }
+      }, 0);
+
       return dbFirestore;
     } catch (err: any) {
       lastInitializationError = err?.message || String(err);
@@ -193,6 +203,36 @@ function writeDatabase(data: any) {
     fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
   } catch (err) {
     console.error("Error writing database to file:", err);
+  }
+}
+
+// Background migration from local fallback json to Firebase Firestore
+async function migrateLocalToFirestore(db: Firestore) {
+  try {
+    const localRecords = readDatabase();
+    if (!localRecords || localRecords.length === 0) {
+      return;
+    }
+
+    console.log(`[Migration] Found ${localRecords.length} offline/local records. Syncing to Firestore...`);
+    let migratedCount = 0;
+    for (const record of localRecords) {
+      if (!record.id) continue;
+      try {
+        await db.collection("grants").doc(record.id).set(record);
+        migratedCount++;
+      } catch (err) {
+        console.error(`[Migration] Failed to upload record ${record.id} to Firestore:`, err);
+      }
+    }
+
+    if (migratedCount > 0) {
+      console.log(`[Migration] Successfully synced ${migratedCount} local records to Cloud Firestore.`);
+      // Clear the local file cache now that they are securely backed up in the cloud
+      writeDatabase([]);
+    }
+  } catch (err) {
+    console.error("[Migration] Fatal error while running local database sync:", err);
   }
 }
 
